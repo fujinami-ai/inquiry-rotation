@@ -232,6 +232,18 @@
   .lbr-name { display: flex; align-items: center; gap: 7px; flex: 1; font-size: 14px; font-weight: 700; min-width: 0; }
   .lbr-btn { padding: 12px 14px !important; border-radius: 9px !important; font-size: 13px !important; white-space: nowrap; flex-shrink: 0; }
 
+  /* +1/-1 修正ボタン */
+  .btn-adjust {
+    background: none; border: 1px solid var(--border); color: var(--text-dim);
+    font-size: 11px; width: 22px; height: 22px; border-radius: 4px;
+    cursor: pointer; font-family: 'IBM Plex Mono', monospace; line-height: 1;
+    transition: all 0.12s; padding: 0;
+  }
+  .btn-adjust:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-adjust:active { transform: scale(0.9); }
+  .lbr-group { display: flex; flex-direction: column; align-items: center; gap: 3px; flex-shrink: 0; }
+  .lbr-adjust { display: flex; gap: 3px; }
+
   @keyframes flash { 0%{opacity:1} 30%{opacity:0.1} 100%{opacity:1} }
   .flash { animation: flash 0.3s ease; }
   ::-webkit-scrollbar { width: 4px; }
@@ -518,12 +530,18 @@
           </div>
         </td>
         <td class="td-total">累計<br>${tc.total||0}件</td>
+        <td style="padding:3px 4px;white-space:nowrap">
+          <button class="btn-adjust btn-plus" title="+1">＋</button>
+          <button class="btn-adjust btn-minus" title="-1">－</button>
+        </td>
         <td style="width:44px;padding:3px 4px">
           <button class="btn-absent-toggle ${isAbsent?'is-absent':''}" data-m="${m}" data-t="${type}">
             ${isAbsent?'復帰':'不在'}
           </button>
         </td>`;
       tr.querySelector('.btn-absent-toggle').addEventListener('click', () => toggleAbsent(type, m));
+      tr.querySelector('.btn-plus').addEventListener('click', () => adjustCount(type, m, 1));
+      tr.querySelector('.btn-minus').addEventListener('click', () => adjustCount(type, m, -1));
       tbl.appendChild(tr);
     });
 
@@ -616,14 +634,28 @@
           <div class="lawyer-avatar" style="width:24px;height:24px;font-size:10px;flex-shrink:0">${initial}</div>
           <span>${m}</span>
         </div>
-        <button class="btn-lawyer btn-consult lbr-btn" data-m="${m}" data-type="consult">
-          ⚖️ 相談
-        </button>
-        <button class="btn-lawyer btn-retainer lbr-btn" data-m="${m}" data-type="retainer">
-          📋 顧問依頼
-        </button>`;
+        <div class="lbr-group">
+          <button class="btn-lawyer btn-consult lbr-btn" data-m="${m}" data-type="consult">⚖️ 相談</button>
+          <div class="lbr-adjust">
+            <button class="btn-adjust btn-plus" data-m="${m}" data-type="consult" title="+1">＋</button>
+            <button class="btn-adjust btn-minus" data-m="${m}" data-type="consult" title="-1">－</button>
+          </div>
+        </div>
+        <div class="lbr-group">
+          <button class="btn-lawyer btn-retainer lbr-btn" data-m="${m}" data-type="retainer">📋 顧問依頼</button>
+          <div class="lbr-adjust">
+            <button class="btn-adjust btn-plus" data-m="${m}" data-type="retainer" title="+1">＋</button>
+            <button class="btn-adjust btn-minus" data-m="${m}" data-type="retainer" title="-1">－</button>
+          </div>
+        </div>`;
       row.querySelectorAll('.btn-lawyer').forEach(btn => {
         btn.addEventListener('click', () => recordLawyer(btn.dataset.m, btn.dataset.type, btn));
+      });
+      row.querySelectorAll('.btn-plus').forEach(btn => {
+        btn.addEventListener('click', () => adjustLawyerCount(btn.dataset.m, btn.dataset.type, 1));
+      });
+      row.querySelectorAll('.btn-minus').forEach(btn => {
+        btn.addEventListener('click', () => adjustLawyerCount(btn.dataset.m, btn.dataset.type, -1));
       });
       listEl.appendChild(row);
     });
@@ -653,6 +685,52 @@
       btnEl.style.transform = 'scale(0.93)';
       setTimeout(() => { btnEl.style.transform = ''; }, 150);
     }
+  }
+
+  // ---- 件数修正（個人・法人）----
+  async function adjustCount(type, name, delta) {
+    const snap = await get(ref(db, type));
+    const data = snap.val();
+    const todayKey = today();
+    const daily = { ...(data.daily || {}) };
+    const dayData = { ...(daily[todayKey] || {}) };
+    const md = { ...(dayData[name] || { total:0, line:0, inquiry:0 }) };
+    md.total = Math.max(0, (md.total||0) + delta);
+    // line/inquiryの合計がtotalを超えないよう調整
+    if (delta < 0 && md.total < (md.line||0) + (md.inquiry||0)) {
+      // lineから先に減らす
+      const excess = (md.line||0) + (md.inquiry||0) - md.total;
+      md.line = Math.max(0, (md.line||0) - excess);
+    }
+    dayData[name] = md;
+    daily[todayKey] = dayData;
+    const totals = { ...(data.totals || {}) };
+    const mt = { ...(totals[name] || { total:0, line:0, inquiry:0 }) };
+    mt.total = Math.max(0, (mt.total||0) + delta);
+    if (delta < 0 && mt.total < (mt.line||0) + (mt.inquiry||0)) {
+      const excess = (mt.line||0) + (mt.inquiry||0) - mt.total;
+      mt.line = Math.max(0, (mt.line||0) - excess);
+    }
+    totals[name] = mt;
+    await set(ref(db, type), { ...data, daily, totals });
+  }
+
+  // ---- 件数修正（弁護士）----
+  async function adjustLawyerCount(name, type, delta) {
+    const snap = await get(ref(db, 'lawyer'));
+    const data = snap.val();
+    const todayKey = today();
+    const daily = { ...(data.daily || {}) };
+    const dayData = { ...(daily[todayKey] || {}) };
+    const md = { ...(dayData[name] || { consult:0, retainer:0 }) };
+    md[type] = Math.max(0, (md[type]||0) + delta);
+    dayData[name] = md;
+    daily[todayKey] = dayData;
+    const totals = { ...(data.totals || {}) };
+    const mt = { ...(totals[name] || { consult:0, retainer:0 }) };
+    mt[type] = Math.max(0, (mt[type]||0) + delta);
+    totals[name] = mt;
+    await set(ref(db, 'lawyer'), { ...data, daily, totals });
   }
 
   // ---- 個人・法人操作 ----
