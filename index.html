@@ -208,25 +208,19 @@
 
   .lawyer-edit-section { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 12px; }
 
-  /* ---- 弁護士サマリーカード ---- */
-  .lawyer-summary { display: flex; flex-direction: column; gap: 7px; }
-  .lawyer-summary-card {
-    background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 6px 10px;
-    transition: border-color 0.15s;
+  /* ---- 弁護士サマリー（1枚カード・全員まとめて） ---- */
+  .lawyer-summary {
+    background: var(--surface2); border: 1px solid var(--lawyer);
+    border-radius: 8px; padding: 7px 10px; margin-bottom: 2px;
   }
-  .lawyer-summary-card:hover { border-color: var(--lawyer); }
-  .lsc-header { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
-  .lsc-name { font-size: 11px; font-weight: 700; flex: 1; }
-  .lsc-today { display: flex; align-items: baseline; gap: 2px; }
-  .lsc-today-num { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 700; color: var(--lawyer); line-height: 1; }
-  .lsc-today-label { font-size: 9px; color: var(--text-dim); }
-  .lsc-body { display: flex; align-items: center; gap: 0; }
-  .lsc-stat { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; }
-  .lsc-stat-label { font-size: 8px; color: var(--text-dim); letter-spacing: 0.03em; }
-  .lsc-stat-day { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700; line-height: 1; }
-  .lsc-stat-total { font-family: 'IBM Plex Mono', monospace; font-size: 8px; color: var(--text-dim); }
-  .lsc-divider { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+  .lsc-table { width: 100%; border-collapse: collapse; }
+  .lsc-table tr { border-bottom: 1px solid var(--border); }
+  .lsc-table tr:last-child { border-bottom: none; }
+  .lsc-table td { padding: 4px 5px; font-size: 10px; vertical-align: middle; }
+  .lsc-td-name { font-weight: 700; font-size: 11px; white-space: nowrap; color: var(--text); }
+  .lsc-td-num { font-family: 'IBM Plex Mono', monospace; text-align: right; white-space: nowrap; }
+  .lsc-day { font-size: 12px; font-weight: 700; }
+  .lsc-cum { font-size: 9px; color: var(--text-dim); }
 
   /* ---- 弁護士記録ボタン行（大きめ） ---- */
   .lawyer-list { display: flex; flex-direction: column; gap: 8px; }
@@ -572,44 +566,42 @@
     const dailyCounts = (data.daily || {})[todayKey] || {};
     const totals = data.totals || {};
 
-    // ---- 上部サマリーカード ----
+    // ---- 上部サマリー（1枚テーブル） ----
     const summaryEl = document.getElementById('lawyer-summary');
     summaryEl.innerHTML = '';
+    const tbl = document.createElement('table');
+    tbl.className = 'lsc-table';
+    // ヘッダー行
+    const hdr = document.createElement('tr');
+    hdr.innerHTML = `
+      <td class="lsc-td-name" style="color:var(--text-dim);font-size:9px;font-weight:400"></td>
+      <td class="lsc-td-num" style="color:var(--consult-color);font-size:9px">⚖️相談</td>
+      <td class="lsc-td-num" style="color:var(--retainer-color);font-size:9px">📋顧問</td>
+      <td class="lsc-td-num" style="color:var(--lawyer);font-size:9px">合計</td>`;
+    tbl.appendChild(hdr);
     members.forEach(m => {
       const dc = dailyCounts[m] || { consult: 0, retainer: 0 };
       const tc = totals[m] || { consult: 0, retainer: 0 };
       const dayTotal = (dc.consult||0) + (dc.retainer||0);
       const allTotal = (tc.consult||0) + (tc.retainer||0);
-      const initial = m.replace(/先生|弁護士/, '').charAt(0);
-      const sc = document.createElement('div');
-      sc.className = 'lawyer-summary-card';
-      sc.innerHTML = `
-        <div class="lsc-header">
-          <div class="lawyer-avatar" style="width:26px;height:26px;font-size:11px">${initial}</div>
-          <div class="lsc-name">${m}</div>
-          <div class="lsc-today"><span class="lsc-today-num">${dayTotal}</span><span class="lsc-today-label">本日</span></div>
-        </div>
-        <div class="lsc-body">
-          <div class="lsc-stat">
-            <div class="lsc-stat-label" style="color:var(--consult-color)">相談</div>
-            <div class="lsc-stat-day" style="color:var(--consult-color)">${dc.consult||0}</div>
-            <div class="lsc-stat-total">累計 ${tc.consult||0}</div>
-          </div>
-          <div class="lsc-divider"></div>
-          <div class="lsc-stat">
-            <div class="lsc-stat-label" style="color:var(--retainer-color)">顧問依頼</div>
-            <div class="lsc-stat-day" style="color:var(--retainer-color)">${dc.retainer||0}</div>
-            <div class="lsc-stat-total">累計 ${tc.retainer||0}</div>
-          </div>
-          <div class="lsc-divider"></div>
-          <div class="lsc-stat">
-            <div class="lsc-stat-label" style="color:var(--lawyer)">合計</div>
-            <div class="lsc-stat-day" style="color:var(--lawyer)">${dayTotal}</div>
-            <div class="lsc-stat-total">累計 ${allTotal}</div>
-          </div>
-        </div>`;
-      summaryEl.appendChild(sc);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="lsc-td-name">${m}</td>
+        <td class="lsc-td-num">
+          <span class="lsc-day" style="color:var(--consult-color)">${dc.consult||0}</span>
+          <span class="lsc-cum"> /累${tc.consult||0}</span>
+        </td>
+        <td class="lsc-td-num">
+          <span class="lsc-day" style="color:var(--retainer-color)">${dc.retainer||0}</span>
+          <span class="lsc-cum"> /累${tc.retainer||0}</span>
+        </td>
+        <td class="lsc-td-num">
+          <span class="lsc-day" style="color:var(--lawyer)">${dayTotal}</span>
+          <span class="lsc-cum"> /累${allTotal}</span>
+        </td>`;
+      tbl.appendChild(tr);
     });
+    summaryEl.appendChild(tbl);
 
     // ---- 記録ボタン（コンパクト） ----
     const listEl = document.getElementById('lawyer-list');
