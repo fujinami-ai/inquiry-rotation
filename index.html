@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>問い合わせ振り分けシステム</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f0f13;
+    --surface2: #23232f;
+    --border: #2e2e3e;
+    --personal: #00c9a7;
+    --personal-dim: #00c9a715;
+    --corporate: #f97316;
+    --corporate-dim: #f9731615;
+    --lawyer: #c084fc;
+    --lawyer-dim: #c084fc15;
+    --line-color: #06C755;
+    --inquiry-color: #60a5fa;
+    --consult-color: #c084fc;
+    --retainer-color: #f472b6;
+    --text: #e8e8f0;
+    --text-dim: #6060a0;
+    --accent: #a78bfa;
+    --absent: #ef4444;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Noto Sans JP', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+
+  header { padding: 14px 28px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 16px; font-weight: 700; letter-spacing: 0.05em; }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  span.tag { font-family: 'IBM Plex Mono', monospace; font-size: 11px; background: var(--accent); color: #fff; padding: 2px 8px; border-radius: 4px; }
+  .sync-indicator { font-family: 'IBM Plex Mono', monospace; font-size: 11px; display: flex; align-items: center; gap: 5px; color: var(--text-dim); }
+  .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); transition: background 0.3s; }
+  .sync-dot.live { background: var(--personal); box-shadow: 0 0 6px var(--personal); }
+
+  /* 3カラムレイアウト */
+  .main { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; }
+  .panel { padding: 20px 22px; border-right: 1px solid var(--border); overflow-y: auto; }
+  .panel:last-child { border-right: none; }
+
+  .panel-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .panel-dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot-personal { background: var(--personal); box-shadow: 0 0 8px var(--personal); }
+  .dot-corporate { background: var(--corporate); box-shadow: 0 0 8px var(--corporate); }
+  .dot-lawyer { background: var(--lawyer); box-shadow: 0 0 8px var(--lawyer); }
+  .panel-title { font-size: 18px; font-weight: 900; letter-spacing: 0.08em; }
+
+  /* ---- 個人・法人パネル共通 ---- */
+  .current-card { border-radius: 12px; padding: 16px 18px 13px; margin-bottom: 11px; }
+  .current-card.personal { background: var(--personal-dim); border: 1.5px solid var(--personal); }
+  .current-card.corporate { background: var(--corporate-dim); border: 1.5px solid var(--corporate); }
+  .current-label { font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; opacity: 0.55; margin-bottom: 4px; }
+  .current-name { font-size: 30px; font-weight: 900; line-height: 1; margin-bottom: 5px; }
+  .current-name.personal { color: var(--personal); }
+  .current-name.corporate { color: var(--corporate); }
+  .current-count { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-dim); }
+  .current-count strong { color: var(--text); font-size: 13px; }
+
+  .action-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 14px; }
+  .btn-action {
+    padding: 11px 5px; border-radius: 9px; border: none;
+    font-family: 'Noto Sans JP', sans-serif; font-size: 11px; font-weight: 700;
+    cursor: pointer; transition: all 0.15s ease;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    position: relative; overflow: hidden;
+  }
+  .btn-action::after { content: ''; position: absolute; inset: 0; background: rgba(255,255,255,0.1); opacity: 0; transition: opacity 0.15s; }
+  .btn-action:hover::after { opacity: 1; }
+  .btn-action:active { transform: scale(0.97); }
+  .btn-action:disabled { opacity: 0.3; cursor: not-allowed; }
+  .btn-line { background: var(--line-color); color: #fff; }
+  .btn-inquiry { background: var(--inquiry-color); color: #0f0f13; }
+  .btn-skip { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border) !important; font-size: 10px; }
+  .btn-skip:not(:disabled):hover { border-color: var(--accent) !important; color: var(--accent); }
+  .btn-sublabel { font-size: 8px; opacity: 0.75; font-weight: 400; }
+
+  .section-label { font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.15em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px; }
+
+  .absent-wrap { margin-bottom: 10px; }
+  .absent-label { font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.12em; color: var(--absent); text-transform: uppercase; margin-bottom: 4px; opacity: 0.8; }
+  .absent-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+  .absent-badge { display: flex; align-items: center; gap: 5px; background: #ef444415; border: 1px solid #ef444440; border-radius: 20px; padding: 2px 8px 2px 7px; font-size: 11px; }
+  .badge-name { color: var(--text); }
+  .badge-restore { background: none; border: none; color: var(--absent); cursor: pointer; font-size: 10px; font-family: 'Noto Sans JP', sans-serif; opacity: 0.8; }
+  .badge-restore:hover { opacity: 1; text-decoration: underline; }
+
+  .table-header { display: flex; align-items: center; margin-bottom: 5px; }
+  .member-table { width: 100%; border-collapse: collapse; }
+  .member-table tr { border-bottom: 1px solid var(--border); }
+  .member-table tr:last-child { border-bottom: none; }
+  .member-table tr.row-next { background: var(--surface2); }
+  .member-table tr.row-absent { opacity: 0.35; }
+  .member-table td { padding: 6px 6px; font-size: 11px; vertical-align: middle; }
+  .td-rank { width: 20px; font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: var(--text-dim); text-align: center; }
+  .td-name { font-weight: 500; }
+  .td-name.is-next { font-weight: 700; }
+  .td-name.is-absent { text-decoration: line-through; color: var(--text-dim); }
+  .next-badge { font-size: 8px; color: var(--text-dim); font-weight: 400; margin-left: 3px; }
+  .td-counts { text-align: right; }
+  .count-total { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; color: var(--text); }
+  .count-break { font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: var(--text-dim); margin-top: 1px; }
+  .count-break .lc { color: var(--line-color); }
+  .count-break .ic { color: var(--inquiry-color); }
+  .td-total { text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: var(--text-dim); white-space: nowrap; }
+  .count-bar { height: 3px; border-radius: 2px; margin-top: 2px; transition: width 0.4s ease; min-width: 2px; }
+  .count-bar.personal { background: var(--personal); opacity: 0.6; }
+  .count-bar.corporate { background: var(--corporate); opacity: 0.6; }
+  .count-bar.is-next { opacity: 1; }
+  .btn-absent-toggle { background: none; border: 1px solid var(--border); color: var(--text-dim); font-size: 9px; padding: 2px 5px; border-radius: 4px; cursor: pointer; font-family: 'Noto Sans JP', sans-serif; transition: all 0.15s; white-space: nowrap; }
+  .btn-absent-toggle:hover { border-color: var(--absent); color: var(--absent); }
+  .btn-absent-toggle.is-absent { border-color: var(--absent); color: var(--absent); background: #ef444415; }
+
+  .btn-reset-counts { background: none; border: 1px solid var(--border); color: var(--text-dim); font-family: 'Noto Sans JP', sans-serif; font-size: 10px; padding: 3px 8px; border-radius: 5px; cursor: pointer; transition: all 0.15s; margin-left: auto; }
+  .btn-reset-counts:hover { border-color: var(--absent); color: var(--absent); }
+
+  .history-section { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
+  .history-list { display: flex; flex-direction: column; gap: 2px; max-height: 90px; overflow-y: auto; }
+  .history-item { font-size: 10px; color: var(--text-dim); padding: 2px 6px; display: flex; gap: 6px; align-items: center; }
+  .h-name { color: var(--text); }
+  .h-source { font-size: 9px; padding: 1px 5px; border-radius: 8px; font-weight: 700; }
+  .h-source.line { background: #06C75520; color: var(--line-color); }
+  .h-source.inquiry { background: #60a5fa20; color: var(--inquiry-color); }
+  .h-source.skip { background: #ffffff10; color: var(--text-dim); }
+
+  .edit-section { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 12px; }
+  .edit-toggle { background: none; border: 1px solid var(--border); color: var(--text-dim); font-family: 'Noto Sans JP', sans-serif; font-size: 10px; padding: 4px 10px; border-radius: 7px; cursor: pointer; transition: all 0.15s; margin-bottom: 7px; }
+  .edit-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  .edit-area { display: none; }
+  .edit-area.open { display: block; }
+  .member-row { display: flex; gap: 6px; align-items: center; margin-bottom: 5px; }
+  .member-input { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); font-family: 'Noto Sans JP', sans-serif; font-size: 12px; padding: 5px 9px; border-radius: 6px; outline: none; transition: border-color 0.15s; }
+  .member-input:focus { border-color: var(--accent); }
+  .btn-del { background: none; border: 1px solid var(--border); color: var(--text-dim); width: 26px; height: 26px; border-radius: 5px; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+  .btn-del:hover { border-color: var(--absent); color: var(--absent); }
+  .btn-add { background: none; border: 1px dashed var(--border); color: var(--text-dim); font-family: 'Noto Sans JP', sans-serif; font-size: 10px; padding: 4px 10px; border-radius: 6px; cursor: pointer; width: 100%; transition: all 0.15s; margin-top: 3px; }
+  .btn-add:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-save { margin-top: 6px; background: var(--accent); border: none; color: #fff; font-family: 'Noto Sans JP', sans-serif; font-size: 10px; font-weight: 700; padding: 5px 14px; border-radius: 6px; cursor: pointer; }
+  .btn-save:hover { opacity: 0.85; }
+
+  /* ---- 弁護士パネル専用 ---- */
+  .lawyer-intro {
+    background: var(--lawyer-dim);
+    border: 1.5px solid var(--lawyer);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 14px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+  .lawyer-intro strong { color: var(--lawyer); font-size: 13px; }
+
+  .lawyer-list { display: flex; flex-direction: column; gap: 10px; }
+
+  .lawyer-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    transition: border-color 0.15s;
+  }
+  .lawyer-card:hover { border-color: var(--lawyer); }
+
+  .lawyer-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .lawyer-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--lawyer-dim); border: 1.5px solid var(--lawyer);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 900; color: var(--lawyer);
+    flex-shrink: 0;
+  }
+  .lawyer-name { font-size: 15px; font-weight: 700; flex: 1; }
+  .lawyer-total-badge {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+    color: var(--text-dim); text-align: right;
+  }
+  .lawyer-total-badge strong { color: var(--text); font-size: 13px; }
+
+  .lawyer-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+
+  .btn-lawyer {
+    padding: 10px 8px; border-radius: 8px; border: none;
+    font-family: 'Noto Sans JP', sans-serif; font-size: 11px; font-weight: 700;
+    cursor: pointer; transition: all 0.15s;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    position: relative; overflow: hidden;
+  }
+  .btn-lawyer::after { content: ''; position: absolute; inset: 0; background: rgba(255,255,255,0.1); opacity: 0; transition: opacity 0.15s; }
+  .btn-lawyer:hover::after { opacity: 1; }
+  .btn-lawyer:active { transform: scale(0.97); }
+  .btn-lawyer:disabled { opacity: 0.3; cursor: not-allowed; }
+  .btn-consult { background: var(--consult-color); color: #0f0f13; }
+  .btn-retainer { background: var(--retainer-color); color: #0f0f13; }
+
+  .lawyer-counts {
+    display: flex; gap: 10px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  }
+  .lcount-item { display: flex; flex-direction: column; align-items: center; gap: 1px; flex: 1; background: var(--bg); border-radius: 6px; padding: 5px 4px; }
+  .lcount-label { font-size: 8px; color: var(--text-dim); letter-spacing: 0.05em; }
+  .lcount-day { font-size: 16px; font-weight: 700; line-height: 1; }
+  .lcount-day.consult { color: var(--consult-color); }
+  .lcount-day.retainer { color: var(--retainer-color); }
+  .lcount-total { font-size: 9px; color: var(--text-dim); }
+
+  .lawyer-edit-section { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 12px; }
+
+  /* ---- 弁護士サマリーカード ---- */
+  .lawyer-summary { display: flex; flex-direction: column; gap: 7px; }
+  .lawyer-summary-card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px;
+    transition: border-color 0.15s;
+  }
+  .lawyer-summary-card:hover { border-color: var(--lawyer); }
+  .lsc-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .lsc-name { font-size: 13px; font-weight: 700; flex: 1; }
+  .lsc-today { display: flex; align-items: baseline; gap: 3px; }
+  .lsc-today-num { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 700; color: var(--lawyer); line-height: 1; }
+  .lsc-today-label { font-size: 9px; color: var(--text-dim); }
+  .lsc-body { display: flex; align-items: center; gap: 0; }
+  .lsc-stat { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+  .lsc-stat-label { font-size: 9px; color: var(--text-dim); letter-spacing: 0.03em; }
+  .lsc-stat-day { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 700; line-height: 1; }
+  .lsc-stat-total { font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: var(--text-dim); }
+  .lsc-divider { width: 1px; height: 32px; background: var(--border); margin: 0 4px; }
+
+  /* ---- 弁護士記録ボタン行（コンパクト） ---- */
+  .lawyer-list { display: flex; flex-direction: column; gap: 5px; }
+  .lawyer-btn-row {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px;
+  }
+  .lbr-name { display: flex; align-items: center; gap: 6px; flex: 1; font-size: 12px; font-weight: 600; min-width: 0; }
+  .lbr-btn { padding: 6px 10px !important; border-radius: 7px !important; font-size: 11px !important; white-space: nowrap; flex-shrink: 0; }
+
+  @keyframes flash { 0%{opacity:1} 30%{opacity:0.1} 100%{opacity:1} }
+  .flash { animation: flash 0.3s ease; }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>問い合わせ振り分けシステム</h1>
+  <span class="tag">ROTATION</span>
+  <div class="header-right">
+    <div class="sync-indicator">
+      <div class="sync-dot" id="sync-dot"></div>
+      <span id="sync-label">接続中...</span>
+    </div>
+  </div>
+</header>
+
+<div class="main">
+  <!-- 個人パネル -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-dot dot-personal"></div>
+      <div class="panel-title">個　人</div>
+    </div>
+    <div class="current-card personal" id="card-personal">
+      <div class="current-label">次の担当</div>
+      <div class="current-name personal" id="name-personal">—</div>
+      <div class="current-count" id="count-personal"></div>
+    </div>
+    <div class="action-row">
+      <button class="btn-action btn-line" id="btn-line-personal" disabled>
+        <span style="font-size:13px">💬</span><span>LINE</span>
+        <span class="btn-sublabel">完了→次へ</span>
+      </button>
+      <button class="btn-action btn-inquiry" id="btn-inquiry-personal" disabled>
+        <span style="font-size:13px">📧</span><span>問い合わせ</span>
+        <span class="btn-sublabel">完了→次へ</span>
+      </button>
+      <button class="btn-action btn-skip" id="btn-skip-personal" disabled>
+        ⏭<span style="font-size:8px;margin-top:1px;display:block;font-weight:400">不在<br>スキップ</span>
+      </button>
+    </div>
+    <div id="absent-wrap-personal" style="display:none" class="absent-wrap">
+      <div class="absent-label">🔴 不在中</div>
+      <div class="absent-badges" id="absent-badges-personal"></div>
+    </div>
+    <div class="table-header">
+      <div class="section-label" style="margin-bottom:0">担当者・件数（本日）</div>
+      <button class="btn-reset-counts" id="reset-personal">日次リセット</button>
+    </div>
+    <table class="member-table" id="table-personal"></table>
+    <div class="history-section">
+      <div class="section-label">履歴</div>
+      <div class="history-list" id="history-personal"></div>
+    </div>
+    <div class="edit-section">
+      <button class="edit-toggle" id="edit-toggle-personal">⚙ 担当者を編集</button>
+      <div class="edit-area" id="edit-personal">
+        <div id="member-list-personal"></div>
+        <button class="btn-add" id="add-personal">＋ 担当者を追加</button><br>
+        <button class="btn-save" id="save-personal">保存して反映</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 法人パネル -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-dot dot-corporate"></div>
+      <div class="panel-title">法　人</div>
+    </div>
+    <div class="current-card corporate" id="card-corporate">
+      <div class="current-label">次の担当</div>
+      <div class="current-name corporate" id="name-corporate">—</div>
+      <div class="current-count" id="count-corporate"></div>
+    </div>
+    <div class="action-row">
+      <button class="btn-action btn-line" id="btn-line-corporate" disabled>
+        <span style="font-size:13px">💬</span><span>LINE</span>
+        <span class="btn-sublabel">完了→次へ</span>
+      </button>
+      <button class="btn-action btn-inquiry" id="btn-inquiry-corporate" disabled>
+        <span style="font-size:13px">📧</span><span>問い合わせ</span>
+        <span class="btn-sublabel">完了→次へ</span>
+      </button>
+      <button class="btn-action btn-skip" id="btn-skip-corporate" disabled>
+        ⏭<span style="font-size:8px;margin-top:1px;display:block;font-weight:400">不在<br>スキップ</span>
+      </button>
+    </div>
+    <div id="absent-wrap-corporate" style="display:none" class="absent-wrap">
+      <div class="absent-label">🔴 不在中</div>
+      <div class="absent-badges" id="absent-badges-corporate"></div>
+    </div>
+    <div class="table-header">
+      <div class="section-label" style="margin-bottom:0">担当者・件数（本日）</div>
+      <button class="btn-reset-counts" id="reset-corporate">日次リセット</button>
+    </div>
+    <table class="member-table" id="table-corporate"></table>
+    <div class="history-section">
+      <div class="section-label">履歴</div>
+      <div class="history-list" id="history-corporate"></div>
+    </div>
+    <div class="edit-section">
+      <button class="edit-toggle" id="edit-toggle-corporate">⚙ 担当者を編集</button>
+      <div class="edit-area" id="edit-corporate">
+        <div id="member-list-corporate"></div>
+        <button class="btn-add" id="add-corporate">＋ 担当者を追加</button><br>
+        <button class="btn-save" id="save-corporate">保存して反映</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弁護士パネル -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-dot dot-lawyer"></div>
+      <div class="panel-title">弁 護 士</div>
+    </div>
+    <!-- 累計サマリーカード群 -->
+    <div id="lawyer-summary" class="lawyer-summary"></div>
+    <div class="section-label" style="margin-bottom:8px;margin-top:14px">記録ボタン</div>
+    <div class="lawyer-list" id="lawyer-list"></div>
+    <div class="lawyer-edit-section">
+      <button class="edit-toggle" id="edit-toggle-lawyer">⚙ 弁護士を編集</button>
+      <div class="edit-area" id="edit-lawyer">
+        <div id="member-list-lawyer"></div>
+        <button class="btn-add" id="add-lawyer">＋ 弁護士を追加</button><br>
+        <button class="btn-save" id="save-lawyer">保存して反映</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+  import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCdIEF08quSIcdh3Y_AAR-C_6dGslXVaiw",
+    authDomain: "tantou-jurist.firebaseapp.com",
+    databaseURL: "https://tantou-jurist-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "tantou-jurist",
+    storageBucket: "tantou-jurist.firebasestorage.app",
+    messagingSenderId: "965334715365",
+    appId: "1:965334715365:web:7ff0f90d9a682d59a13d0c"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  function today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
+  const defaults = {
+    personal:  { members: ['田中', '佐藤', '鈴木', '山田'], daily: {}, totals: {}, absent: [], skippedOnce: [], history: [] },
+    corporate: { members: ['高橋', '伊藤', '渡辺'],         daily: {}, totals: {}, absent: [], skippedOnce: [], history: [] },
+    lawyer:    { members: ['山本先生', '中村先生'],          daily: {}, totals: {} }
+  };
+
+  // ---- ローテーション系共通ロジック ----
+  function getNext(data, exclude = []) {
+    const todayKey = today();
+    const dailyCounts = (data.daily || {})[todayKey] || {};
+    const absent = data.absent || [];
+    const skippedOnce = data.skippedOnce || [];
+    const allExclude = [...absent, ...skippedOnce, ...exclude];
+    let candidates = (data.members || []).filter(m => !allExclude.includes(m));
+    if (candidates.length === 0) {
+      candidates = (data.members || []).filter(m => !absent.includes(m) && !exclude.includes(m));
+    }
+    if (candidates.length === 0) return null;
+    return candidates.reduce((best, m) => {
+      const bc = dailyCounts[best]?.total || 0;
+      const mc = dailyCounts[m]?.total || 0;
+      if (mc < bc) return m;
+      if (mc === bc && (data.members||[]).indexOf(m) < (data.members||[]).indexOf(best)) return m;
+      return best;
+    });
+  }
+
+  // 接続状態
+  onValue(ref(db, '.info/connected'), snap => {
+    const ok = snap.val();
+    document.getElementById('sync-dot').className = 'sync-dot' + (ok ? ' live' : '');
+    document.getElementById('sync-label').textContent = ok ? 'リアルタイム同期中' : '切断中...';
+    ['personal', 'corporate'].forEach(t => {
+      ['line', 'inquiry', 'skip'].forEach(a => {
+        const el = document.getElementById(`btn-${a}-${t}`);
+        if (el) el.disabled = !ok;
+      });
+    });
+  });
+
+  // 初期データ＆日付チェック（日付が変わっていたら自動リセット）
+  async function initAndCheckDate(type) {
+    const snap = await get(ref(db, type));
+    if (!snap.exists()) {
+      await set(ref(db, type), defaults[type]);
+      return;
+    }
+    const data = snap.val();
+    const todayKey = today();
+    const lastDate = data.lastDate || null;
+    if (lastDate !== todayKey) {
+      // 日付が変わっていた場合：daily は今日分だけ残す、skippedOnce・absent をリセット
+      const daily = data.daily || {};
+      const cleanedDaily = {};
+      if (daily[todayKey]) cleanedDaily[todayKey] = daily[todayKey];
+      const updates = { ...data, daily: cleanedDaily, skippedOnce: [], lastDate: todayKey };
+      if (type !== 'lawyer') updates.absent = [];
+      await set(ref(db, type), updates);
+    }
+  }
+
+  for (const type of ['personal', 'corporate', 'lawyer']) {
+    initAndCheckDate(type);
+  }
+
+  // リアルタイム購読
+  ['personal', 'corporate'].forEach(type => {
+    onValue(ref(db, type), snap => { if (snap.val()) renderRotation(type, snap.val()); });
+  });
+  onValue(ref(db, 'lawyer'), snap => { if (snap.val()) renderLawyer(snap.val()); });
+
+  // ---- 個人・法人レンダリング ----
+  function renderRotation(type, data) {
+    const todayKey = today();
+    const members = data.members || [];
+    const dailyCounts = (data.daily || {})[todayKey] || {};
+    const totals = data.totals || {};
+    const absent = data.absent || [];
+    const history = data.history || [];
+    const next = getNext(data);
+
+    document.getElementById('name-' + type).textContent = next || '担当者なし';
+    if (next) {
+      const dc = dailyCounts[next] || {};
+      document.getElementById('count-' + type).innerHTML =
+        `本日 <strong>${dc.total||0}</strong> 件 ` +
+        `<span style="color:var(--line-color)">LINE:${dc.line||0}</span> ` +
+        `<span style="color:var(--inquiry-color)">問:${dc.inquiry||0}</span>`;
+    } else {
+      document.getElementById('count-' + type).textContent = '';
+    }
+
+    const active = members.filter(m => !absent.includes(m));
+    const absentMembers = members.filter(m => absent.includes(m));
+    const sortedActive = [...active].sort((a, b) => {
+      const diff = (dailyCounts[a]?.total||0) - (dailyCounts[b]?.total||0);
+      return diff !== 0 ? diff : members.indexOf(a) - members.indexOf(b);
+    });
+    const sorted = [...sortedActive, ...absentMembers];
+    const maxDay = Math.max(...active.map(m => dailyCounts[m]?.total||0), 1);
+
+    const tbl = document.getElementById('table-' + type);
+    tbl.innerHTML = '';
+    let activeRank = 0;
+    sorted.forEach((m) => {
+      const isAbsent = absent.includes(m);
+      const isNext = m === next;
+      const dc = dailyCounts[m] || {};
+      const tc = totals[m] || {};
+      const barPct = isAbsent ? 0 : Math.round(((dc.total||0) / maxDay) * 100);
+      if (!isAbsent) activeRank++;
+      const tr = document.createElement('tr');
+      tr.className = isNext ? 'row-next' : (isAbsent ? 'row-absent' : '');
+      tr.innerHTML = `
+        <td class="td-rank">${isAbsent ? '休' : activeRank}</td>
+        <td class="td-name ${isNext?'is-next':''} ${isAbsent?'is-absent':''}">
+          ${m}${isNext?`<span class="next-badge">◀ 次</span>`:''}
+          <div class="count-bar ${type} ${isNext?'is-next':''}" style="width:${barPct}%"></div>
+        </td>
+        <td class="td-counts">
+          <div class="count-total">${dc.total||0}<span style="font-size:9px;font-weight:400;color:var(--text-dim)"> 件</span></div>
+          <div class="count-break">
+            <span class="lc">💬${dc.line||0}</span>
+            <span style="margin:0 2px;opacity:0.4">|</span>
+            <span class="ic">📧${dc.inquiry||0}</span>
+          </div>
+        </td>
+        <td class="td-total">累計<br>${tc.total||0}件</td>
+        <td style="width:44px;padding:3px 4px">
+          <button class="btn-absent-toggle ${isAbsent?'is-absent':''}" data-m="${m}" data-t="${type}">
+            ${isAbsent?'復帰':'不在'}
+          </button>
+        </td>`;
+      tr.querySelector('.btn-absent-toggle').addEventListener('click', () => toggleAbsent(type, m));
+      tbl.appendChild(tr);
+    });
+
+    // 不在バッジ
+    const absentWrap = document.getElementById('absent-wrap-' + type);
+    const badgesEl = document.getElementById('absent-badges-' + type);
+    badgesEl.innerHTML = '';
+    if (absent.length > 0) {
+      absentWrap.style.display = 'block';
+      absent.forEach(name => {
+        const badge = document.createElement('div');
+        badge.className = 'absent-badge';
+        badge.innerHTML = `<span class="badge-name">${name}</span><button class="badge-restore">復帰</button>`;
+        badge.querySelector('.badge-restore').onclick = () => toggleAbsent(type, name);
+        badgesEl.appendChild(badge);
+      });
+    } else {
+      absentWrap.style.display = 'none';
+    }
+
+    // 履歴
+    const hEl = document.getElementById('history-' + type);
+    hEl.innerHTML = '';
+    [...history].reverse().slice(0, 15).forEach((h, i) => {
+      const el = document.createElement('div');
+      el.className = 'history-item';
+      const srcLabel = h.source==='line'?'LINE': h.source==='inquiry'?'問い合わせ':'スキップ';
+      el.innerHTML = `
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:9px">${history.length-i}</span>
+        <span class="h-name">${h.name}</span>
+        <span class="h-source ${h.source}">${srcLabel}</span>`;
+      hEl.appendChild(el);
+    });
+  }
+
+  // ---- 弁護士レンダリング ----
+  function renderLawyer(data) {
+    const todayKey = today();
+    const members = data.members || [];
+    const dailyCounts = (data.daily || {})[todayKey] || {};
+    const totals = data.totals || {};
+
+    // ---- 上部サマリーカード ----
+    const summaryEl = document.getElementById('lawyer-summary');
+    summaryEl.innerHTML = '';
+    members.forEach(m => {
+      const dc = dailyCounts[m] || { consult: 0, retainer: 0 };
+      const tc = totals[m] || { consult: 0, retainer: 0 };
+      const dayTotal = (dc.consult||0) + (dc.retainer||0);
+      const allTotal = (tc.consult||0) + (tc.retainer||0);
+      const initial = m.replace(/先生|弁護士/, '').charAt(0);
+      const sc = document.createElement('div');
+      sc.className = 'lawyer-summary-card';
+      sc.innerHTML = `
+        <div class="lsc-header">
+          <div class="lawyer-avatar" style="width:26px;height:26px;font-size:11px">${initial}</div>
+          <div class="lsc-name">${m}</div>
+          <div class="lsc-today"><span class="lsc-today-num">${dayTotal}</span><span class="lsc-today-label">本日</span></div>
+        </div>
+        <div class="lsc-body">
+          <div class="lsc-stat">
+            <div class="lsc-stat-label" style="color:var(--consult-color)">相談</div>
+            <div class="lsc-stat-day" style="color:var(--consult-color)">${dc.consult||0}</div>
+            <div class="lsc-stat-total">累計 ${tc.consult||0}</div>
+          </div>
+          <div class="lsc-divider"></div>
+          <div class="lsc-stat">
+            <div class="lsc-stat-label" style="color:var(--retainer-color)">顧問依頼</div>
+            <div class="lsc-stat-day" style="color:var(--retainer-color)">${dc.retainer||0}</div>
+            <div class="lsc-stat-total">累計 ${tc.retainer||0}</div>
+          </div>
+          <div class="lsc-divider"></div>
+          <div class="lsc-stat">
+            <div class="lsc-stat-label" style="color:var(--lawyer)">合計</div>
+            <div class="lsc-stat-day" style="color:var(--lawyer)">${dayTotal}</div>
+            <div class="lsc-stat-total">累計 ${allTotal}</div>
+          </div>
+        </div>`;
+      summaryEl.appendChild(sc);
+    });
+
+    // ---- 記録ボタン（コンパクト） ----
+    const listEl = document.getElementById('lawyer-list');
+    listEl.innerHTML = '';
+    members.forEach(m => {
+      const dc = dailyCounts[m] || { consult: 0, retainer: 0 };
+      const initial = m.replace(/先生|弁護士/, '').charAt(0);
+      const row = document.createElement('div');
+      row.className = 'lawyer-btn-row';
+      row.innerHTML = `
+        <div class="lbr-name">
+          <div class="lawyer-avatar" style="width:24px;height:24px;font-size:10px;flex-shrink:0">${initial}</div>
+          <span>${m}</span>
+        </div>
+        <button class="btn-lawyer btn-consult lbr-btn" data-m="${m}" data-type="consult">
+          ⚖️ 相談
+        </button>
+        <button class="btn-lawyer btn-retainer lbr-btn" data-m="${m}" data-type="retainer">
+          📋 顧問依頼
+        </button>`;
+      row.querySelectorAll('.btn-lawyer').forEach(btn => {
+        btn.addEventListener('click', () => recordLawyer(btn.dataset.m, btn.dataset.type, btn));
+      });
+      listEl.appendChild(row);
+    });
+  }
+
+  // ---- 弁護士記録 ----
+  async function recordLawyer(name, type, btnEl) {
+    const snap = await get(ref(db, 'lawyer'));
+    const data = snap.val();
+    const todayKey = today();
+    const daily = data.daily || {};
+    const dayData = daily[todayKey] || {};
+    const memberDay = dayData[name] || { consult: 0, retainer: 0 };
+    memberDay[type] = (memberDay[type] || 0) + 1;
+    dayData[name] = memberDay;
+    daily[todayKey] = dayData;
+
+    const totals = data.totals || {};
+    const memberTotal = totals[name] || { consult: 0, retainer: 0 };
+    memberTotal[type] = (memberTotal[type] || 0) + 1;
+    totals[name] = memberTotal;
+
+    await set(ref(db, 'lawyer'), { ...data, daily, totals });
+
+    // フラッシュ
+    if (btnEl) {
+      btnEl.style.transform = 'scale(0.93)';
+      setTimeout(() => { btnEl.style.transform = ''; }, 150);
+    }
+  }
+
+  // ---- 個人・法人操作 ----
+  async function advance(type, source) {
+    const snap = await get(ref(db, type));
+    const data = snap.val();
+    if (!data) return;
+    const next = getNext(data);
+    if (!next) return;
+    const todayKey = today();
+    const daily = data.daily || {};
+    const dayData = daily[todayKey] || {};
+    const memberDay = dayData[next] || { total:0, line:0, inquiry:0 };
+    memberDay.total = (memberDay.total||0) + 1;
+    memberDay[source] = (memberDay[source]||0) + 1;
+    dayData[next] = memberDay;
+    daily[todayKey] = dayData;
+    const totals = data.totals || {};
+    const mt = totals[next] || { total:0, line:0, inquiry:0 };
+    mt.total = (mt.total||0) + 1;
+    mt[source] = (mt[source]||0) + 1;
+    totals[next] = mt;
+    const history = [...(data.history||[]), { name:next, source, date:todayKey }];
+    await set(ref(db, type), { ...data, daily, totals, history, skippedOnce:[] });
+    const card = document.getElementById('card-' + type);
+    card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+  }
+
+  async function skipCurrent(type) {
+    const snap = await get(ref(db, type));
+    const data = snap.val();
+    if (!data) return;
+    const next = getNext(data);
+    if (!next) return;
+    const skippedOnce = [...(data.skippedOnce||[]), next];
+    const nextAfterSkip = getNext({ ...data, skippedOnce });
+    if (!nextAfterSkip || nextAfterSkip === next) { alert('スキップできる担当者がいません'); return; }
+    const history = [...(data.history||[]), { name:next, source:'skip', date:today() }];
+    await set(ref(db, type), { ...data, skippedOnce, history });
+  }
+
+  async function toggleAbsent(type, name) {
+    const snap = await get(ref(db, type));
+    const data = snap.val();
+    const absent = data.absent || [];
+    const isAbsent = absent.includes(name);
+    const newAbsent = isAbsent ? absent.filter(m => m !== name) : [...absent, name];
+    const skippedOnce = (data.skippedOnce||[]).filter(m => m !== name);
+    await set(ref(db, type), { ...data, absent: newAbsent, skippedOnce });
+  }
+
+  async function resetCounts(type) {
+    if (!confirm('本日の件数をリセットしますか？\n（累計は保持されます）')) return;
+    const snap = await get(ref(db, type));
+    const data = snap.val();
+    const daily = { ...(data.daily||{}) };
+    delete daily[today()];
+    await set(ref(db, type), { ...data, daily, skippedOnce:[] });
+  }
+
+  // ---- 担当者編集（個人・法人） ----
+  function renderEditList(type, members) {
+    const container = document.getElementById('member-list-' + type);
+    container.innerHTML = '';
+    members.forEach(m => {
+      const row = document.createElement('div');
+      row.className = 'member-row';
+      row.innerHTML = `<input class="member-input" value="${m}" /><button class="btn-del">×</button>`;
+      row.querySelector('.btn-del').onclick = () => row.remove();
+      container.appendChild(row);
+    });
+  }
+
+  function addMember(type) {
+    const container = document.getElementById('member-list-' + type);
+    const row = document.createElement('div');
+    row.className = 'member-row';
+    row.innerHTML = `<input class="member-input" value="新しい担当者" /><button class="btn-del">×</button>`;
+    row.querySelector('.btn-del').onclick = () => row.remove();
+    container.appendChild(row);
+    setTimeout(() => { const inp = row.querySelector('input'); inp.focus(); inp.select(); }, 50);
+  }
+
+  async function saveMembers(type) {
+    const inputs = document.querySelectorAll(`#member-list-${type} .member-input`);
+    const names = [...inputs].map(i => i.value.trim()).filter(Boolean);
+    const snap = await get(ref(db, type));
+    const data = snap.val() || {};
+    await set(ref(db, type), { ...data, members: names, absent:[], skippedOnce:[] });
+    document.getElementById('edit-' + type).classList.remove('open');
+  }
+
+  // ---- 弁護士編集 ----
+  function renderLawyerEditList(members) {
+    const container = document.getElementById('member-list-lawyer');
+    container.innerHTML = '';
+    members.forEach(m => {
+      const row = document.createElement('div');
+      row.className = 'member-row';
+      row.innerHTML = `<input class="member-input" value="${m}" /><button class="btn-del">×</button>`;
+      row.querySelector('.btn-del').onclick = () => row.remove();
+      container.appendChild(row);
+    });
+  }
+
+  async function saveLawyers() {
+    const inputs = document.querySelectorAll('#member-list-lawyer .member-input');
+    const names = [...inputs].map(i => i.value.trim()).filter(Boolean);
+    const snap = await get(ref(db, 'lawyer'));
+    const data = snap.val() || {};
+    await set(ref(db, 'lawyer'), { ...data, members: names });
+    document.getElementById('edit-lawyer').classList.remove('open');
+  }
+
+  // ---- イベント登録 ----
+  ['personal', 'corporate'].forEach(type => {
+    document.getElementById('btn-line-' + type).addEventListener('click', () => advance(type, 'line'));
+    document.getElementById('btn-inquiry-' + type).addEventListener('click', () => advance(type, 'inquiry'));
+    document.getElementById('btn-skip-' + type).addEventListener('click', () => skipCurrent(type));
+    document.getElementById('reset-' + type).addEventListener('click', () => resetCounts(type));
+    document.getElementById('edit-toggle-' + type).addEventListener('click', () => {
+      const area = document.getElementById('edit-' + type);
+      const isOpen = area.classList.toggle('open');
+      if (isOpen) get(ref(db, type)).then(snap => renderEditList(type, snap.val()?.members || []));
+    });
+    document.getElementById('add-' + type).addEventListener('click', () => addMember(type));
+    document.getElementById('save-' + type).addEventListener('click', () => saveMembers(type));
+  });
+
+  document.getElementById('edit-toggle-lawyer').addEventListener('click', () => {
+    const area = document.getElementById('edit-lawyer');
+    const isOpen = area.classList.toggle('open');
+    if (isOpen) get(ref(db, 'lawyer')).then(snap => renderLawyerEditList(snap.val()?.members || []));
+  });
+  document.getElementById('add-lawyer').addEventListener('click', () => {
+    const container = document.getElementById('member-list-lawyer');
+    const row = document.createElement('div');
+    row.className = 'member-row';
+    row.innerHTML = `<input class="member-input" value="新しい先生" /><button class="btn-del">×</button>`;
+    row.querySelector('.btn-del').onclick = () => row.remove();
+    container.appendChild(row);
+    setTimeout(() => { const inp = row.querySelector('input'); inp.focus(); inp.select(); }, 50);
+  });
+  document.getElementById('save-lawyer').addEventListener('click', saveLawyers);
+</script>
+</body>
+</html>
